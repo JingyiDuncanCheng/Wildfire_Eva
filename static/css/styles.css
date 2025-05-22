@@ -1,0 +1,226 @@
+body {
+    margin: 0;
+    font-family: "Roboto", sans-serif;
+    background-color: #1e1e2f;
+    color: #969393;
+    height: 100vh;
+    display: flex;
+  }
+  
+  #map-container {
+    flex: 1;
+    position: relative;
+  }
+  
+  #map {
+    height: 100vh;
+    width: 100%;
+    background: #1e1e2f;
+  }
+  
+  /* SIDEBAR - default position for larger screens */
+  #sidebar {
+    width: 260px;
+    background: rgba(34, 34, 51, 0.8);
+    color: #fff;
+    padding: 15px;
+    box-shadow: 2px 0 6px rgba(0, 0, 0, 0.5);
+    overflow-y: auto;     /* allow scrolling if content exceeds height */
+  }
+  
+  /* SIDEBAR buttons, headings, etc. */
+  #sidebar h2 {
+    margin-top: 0;
+    font-size: 1.5rem;
+    color: #a7ff50;
+  }
+  #sidebar button {
+    font-size: 0.85rem;
+    padding: 6px 12px;
+    background: #a7ff50;
+    color: #1e1e2f;
+    border: none;
+    border-radius: 4px;
+    margin-bottom: 0.5rem;
+    transition: background 0.3s ease;
+  }
+  #sidebar button:hover {
+    background: #95f153;
+  }
+  #sidebar button.active {
+    background: #a7ff50;
+    color: #1e1e2f;
+  }
+  
+  /* MOBILE sidebar toggle */
+  #sidebarToggle {
+    display: none;
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    z-index: 9999;
+    background: #a7ff50;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 12px;
+    color: #1e1e2f;
+    cursor: pointer;
+  }
+  
+  @media (max-width: 768px) {
+    #sidebar {
+      position: fixed;
+      left: -260px;     /* hidden off-canvas */
+      top: 0;
+      bottom: 0;
+      transition: left 0.3s;
+    }
+    #sidebar.open {
+      left: 0;
+    }
+    #sidebarToggle {
+      display: block;
+    }
+  
+    /* stack layout when sidebar overlay is open */
+    body {
+      flex-direction: column;
+    }
+    #map-container {
+      width: 100%;
+      height: calc(100vh - 50px);
+    }
+    #map {
+      height: calc(100vh - 50px);
+    }
+  }
+  
+  /* POPUP & tooltip colours */
+  .leaflet-popup-content-wrapper,
+  .leaflet-tooltip {
+    background: #2a2a3b;
+    color: #fff;
+    border-radius: 4px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+  }
+  .leaflet-popup-tip {
+    background: #2a2a3b;
+  }
+  
+  /* Legend box */
+  .legend {
+    position: absolute;
+    bottom: 30px;
+    left: 270px;         /* avoid sidebar */
+    background: rgba(34, 34, 51, 0.8);
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    color: #fff;
+    line-height: 1.4;
+  }
+  .legend i {
+    width: 18px;
+    height: 18px;
+    float: left;
+    margin-right: 6px;
+    border-radius: 3px;
+  }
+  
+  /* Loader spinner */
+  #loader {
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10000;
+  }
+  
+  /* Dark-/light-mode toggle group */
+  #modeToggle {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  
+  /* Buttons inside toggle */
+  #modeToggle button {
+    width: 50%;
+    border-radius: 20px;   /* pill style */
+  }
+  #modeToggle .active {
+    background: #a7ff50 !important;
+    color: #1e1e2f !important;
+  }
+  
+  /* Scrollbar styling (optional) */
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #2a2a3b;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: #a7ff50;
+    border-radius: 4px;
+  }
+
+  #modeToggle button {
+    width: 50%;
+    /* so each button takes half the row */
+    border-radius: 20px; /* for a pill-like toggle look */
+  }
+  #modeToggle .active {
+    background: #a7ff50 !important;
+    color: #1e1e2f !important;
+  }
+
+/* ========== Added patch on 2025-05-15 ========== */
+html, body {
+  height: 100%;
+}
+
+/* Flex layout: give remaining space to #content so map gets width */
+#content {
+  flex: 1;
+  position: relative;
+}
+
+
+#map-container {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 260px; /* match sidebar width */
+  right: 0;
+}
+
+@media (max-width: 768px) {
+  #content {
+    flex: none;
+  }
+}
+
+/* ====== Info Panel (右侧滑出) ====== */
+#infoPanel{
+  position: fixed;
+  right: 0; top: 0;
+  width: 320px; height: 100%;
+  background: rgba(34,34,51,.97);
+  color: #fff; padding: 20px 22px 60px;
+  overflow-y: auto; z-index: 1500;
+  transform: translateX(100%);         /* 默认隐藏 */
+  transition: transform .3s ease;
+}
+#infoPanel.show{ transform: translateX(0); }
+
+#infoPanel h3{ font-size:1.05rem; margin:0 0 .7rem; color:#a7ff50; }
+#infoPanel p { font-size:.85rem; line-height:1.35rem; margin:.3rem 0; }
+
+#closeInfo{
+  position:absolute; right:10px; top:8px;
+  background:none; border:none; cursor:pointer;
+  color:#a7ff50; font-size:28px; line-height:24px;
+}
+

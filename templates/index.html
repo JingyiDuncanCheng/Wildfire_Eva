@@ -1,0 +1,483 @@
+{% extends "base.html" %}
+
+{% block title %}Wildfire & Emergency Response{% endblock %}
+
+{% block content %}
+  <div id="map-container">
+      <div id="map"></div>
+  </div>
+
+  <script>
+    const dark   = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png');
+    const color  = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
+    const map = L.map('map', {center: [53.7267, -127.6476], zoom: 6, layers: [color]});
+    L.control.layers({ 'color': color, 'dark': dark }, null, { position: 'topright', collapsed: false }).addTo(map);
+    // --- Layer groups ---
+    var wildfireLayer = L.layerGroup().addTo(map);  // holds wildfire markers
+    var roadClosureLayer = L.layerGroup().addTo(map); // holds road‑closure markers
+    var fireOverlayLayer = L.layerGroup();   // building + firepoint
+    var fireBufferLayer  = L.layerGroup();   // 2 km circle
+    var meshLayer      = L.layerGroup().addTo(map);
+    var userBBoxLayer      = L.layerGroup().addTo(map);   // BBox
+    var roadGraphLayer = L.layerGroup();
+    // ICONS
+    var roadClosureIcon = L.icon({ iconUrl: "static/img/x.png", iconSize: [30, 30], iconAnchor: [10, 10], popupAnchor: [0, -10] });
+    var userIcon        = L.icon({ iconUrl: "static/img/user.png", iconSize: [32, 32], iconAnchor: [10, 10], popupAnchor: [0, -10] });
+    var fireIcon        = L.icon({ iconUrl: "static/img/fire.png", iconSize: [32, 32], iconAnchor: [10, 10], popupAnchor: [0, -10] });
+    const infoPanel  = document.getElementById("infoPanel");
+    const infoTitle  = document.getElementById("infoTitle");
+    const infoBody   = document.getElementById("infoBody");
+    document.getElementById("closeInfo")
+        .addEventListener("click", () => infoPanel.classList.remove("show"));
+
+    function switchPanel(panel) {
+      const emergencyPanel = document.getElementById("emergencyPanel");
+      const adminPanel     = document.getElementById("adminPanel");
+      const btnEmergency   = document.getElementById("btnEmergency");
+      const btnAdmin       = document.getElementById("btnAdmin");
+      if (panel === "emergency") {
+        emergencyPanel.style.display = "block";
+        adminPanel.style.display     = "none";
+        btnEmergency.classList.remove("btn-outline-success");
+        btnEmergency.classList.add("btn-success", "active");
+        btnAdmin.classList.remove("btn-success", "active");
+        btnAdmin.classList.add("btn-outline-success");
+      } else {
+        emergencyPanel.style.display = "none";
+        adminPanel.style.display     = "block";
+        btnAdmin.classList.remove("btn-outline-success");
+        btnAdmin.classList.add("btn-success", "active");
+        btnEmergency.classList.remove("btn-success", "active");
+        btnEmergency.classList.add("btn-outline-success");
+      }
+    }
+
+    // Admin login / logout
+    async function adminLogin() {
+      let username = document.getElementById("adminUsername").value;
+      let password = document.getElementById("adminPassword").value;
+      let response = await fetch("/api/admin_login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      if (response.ok) {
+        alert("Admin logged in.");
+        document.getElementById("loginSection").style.display  = "none";
+        document.getElementById("adminActions").style.display = "block";
+      } else {
+        alert("Invalid credentials.");
+      }
+    }
+    async function adminLogout() {
+      await fetch("/api/admin_logout", { method: "POST" });
+      alert("Admin logged out.");
+      location.reload();
+    }
+
+    // Admin actions
+    async function deleteUser() {
+      let username = document.getElementById("deleteUserInput").value;
+      await fetch("/api/admin_delete_user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username })
+      });
+      alert("User deleted.");
+    }
+    async function deleteWildfire() {
+      let id = document.getElementById("deleteFireInput").value;
+      await fetch("/api/admin_delete_fire", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id })
+      });
+      alert("Wildfire deleted.");
+    }
+    async function deleteRoadClosure() {
+      let id = document.getElementById("deleteRoadInput").value;
+      await fetch("/api/admin_delete_road_closure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id })
+      });
+      alert("Road closure deleted.");
+    }
+
+    // Add fire
+    async function addFireLocation() {
+      let lat = parseFloat(document.getElementById("latInput").value);
+      let lng = parseFloat(document.getElementById("lngInput").value);
+      let description = document.getElementById("fireDesc").value || "Wildfire Alert";
+      let reason      = document.getElementById("fireCause").value || "Unknown";
+      if (isNaN(lat) || isNaN(lng)) { alert("Please select a valid location."); return; }
+      try {
+        let fireResponse = await fetch("/api/add_fire", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ latitude: lat, longitude: lng, description, reason })
+        });
+        if (!fireResponse.ok) { alert("Failed to report wildfire."); return; }
+        alert("Wildfire reported!");
+        // Notify users & allocate vehicles
+        let notifyResponse   = await fetch("/api/notify_nearby_users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ latitude: lat, longitude: lng })
+        });
+        let notifyData = await notifyResponse.json();
+        alert(`Notified Users: ${notifyData.notified_users.join(", ")}`);
+
+        let allocateResponse = await fetch("/api/allocate_vehicles", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ latitude: lat, longitude: lng, required_capacity: 10 })
+        });
+        let allocateData = await allocateResponse.json();
+        let typeSummary  = allocateData.type_summary || {};
+        let summaryLines = Object.keys(typeSummary).map(vtype => `${vtype}: ${typeSummary[vtype].count} vehicles, capacity: ${typeSummary[vtype].total_capacity}`);
+        alert(`Allocated Vehicles: ${allocateData.allocated_vehicles.length}\n${summaryLines.join("\n")}\nOverall capacity: ${allocateData.total_capacity_overall}`);
+        // Just refresh layer (NEW)
+        await loadWildfires();
+      } catch (error) {
+        console.error("Error adding wildfire:", error);
+      }
+    }
+
+    async function addRoadClosure() {
+      let lat = parseFloat(document.getElementById("latInput").value);
+      let lng = parseFloat(document.getElementById("lngInput").value);
+      let reason = document.getElementById("roadReason").value || "Unknown";
+      if (isNaN(lat) || isNaN(lng)) { alert("Please select a valid location."); return; }
+      let response = await fetch("/api/report_road_closure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ latitude: lat, longitude: lng, reason })
+      });
+      if (response.ok) {
+        alert("Road closure added!");
+        await loadRoadClosures(); // redraw layer only
+      }
+    }
+
+    async function setUserLocation() {
+      let lat = parseFloat(document.getElementById("latInput").value);
+      let lng = parseFloat(document.getElementById("lngInput").value);
+      if (isNaN(lat) || isNaN(lng)) { alert("Please select a valid location."); return; }
+      try {
+        let response = await fetch("/api/set_user_location", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ latitude: lat, longitude: lng })
+        });
+        if (response.ok) {
+          alert("User location set successfully!");
+          updateUserMarker(lat, lng, true); // draws marker + stores to localStorage
+        } else {
+          alert("Failed to set location.");
+        }
+      } catch (error) {
+        console.error("Error setting user location:", error);
+      }
+    }
+    
+    // 10 km bbox
+    function computeBBox(lat, lng, halfKm = 5) {        // halfKm
+      const degLat = halfKm / 111;                      // 1° ≈ 111 km
+      const degLng = halfKm / (111 * Math.cos(lat * Math.PI / 180));
+      return [[lat - degLat, lng - degLng], [lat + degLat, lng + degLng]];
+    }
+
+    function updateUserMarker(lat, lng, recenter = false) {
+      if (window.userMarker)  map.removeLayer(window.userMarker);
+      userBBoxLayer.clearLayers();
+      window.userMarker = L.marker([lat, lng], { icon: userIcon }).addTo(map).bindPopup("Your Location");
+      const bbox = computeBBox(lat, lng, 5); // 5 km
+      L.rectangle(bbox, {color: "#39f", weight: 1, dashArray: "4 2", fillOpacity: 0.05}).addTo(userBBoxLayer);
+      localStorage.setItem("myLocation", JSON.stringify({ lat, lng }));
+      if (recenter) map.flyTo([lat, lng], 13, { duration: 1.2 }); // 1.2 duration
+      loadAdaptiveMesh(lat, lng);
+    }
+
+    async function logoutApp() {
+      try {
+        await fetch("/api/logout_user", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: CURRENT_USER }) });
+      } catch (_) {}
+      window.location.href = "/logout";
+    }
+
+    async function addVehicle() {
+      let lat = parseFloat(document.getElementById("vehicleLat").value);
+      let lng = parseFloat(document.getElementById("vehicleLng").value);
+      let capacity = parseInt(document.getElementById("vehicleCapacity").value);
+      let vehicleType = document.getElementById("vehicleType").value;
+      if (isNaN(lat) || isNaN(lng) || isNaN(capacity) || capacity <= 0) { alert("Please enter valid vehicle details."); return; }
+
+      try {
+        let response = await fetch("/api/add_vehicle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ latitude: lat, longitude: lng, capacity, vehicle_type: vehicleType })
+        });
+        if (response.ok) {
+          alert("Vehicle added successfully!");
+        } else {
+          let errorData = await response.json();
+          alert("Error: " + errorData.error);
+        }
+      } catch (error) {
+        console.error("Error adding vehicle:", error);
+      }
+    }
+
+    async function loadWildfires() {
+      wildfireLayer.clearLayers(); // clear old markers
+      let response = await fetch("/api/get_fires");
+      let fires = await response.json();
+      fires.forEach(fire => {
+        const mk = L.marker([fire.latitude, fire.longitude], { icon: fireIcon })
+            .addTo(wildfireLayer)
+            .on("click", () => showFireInfo(fire.id));
+        mk.bindTooltip(`${fire.description}`);
+      });
+    }
+
+    async function loadRoadClosures() {
+      roadClosureLayer.clearLayers(); // clear old markers (NEW)
+      let response = await fetch("/api/get_road_closures");
+      let closures = await response.json();
+      closures.forEach(closure => {
+        L.marker([closure.latitude, closure.longitude], { icon: roadClosureIcon })
+          .addTo(roadClosureLayer)
+          .bindPopup(`<b>❌ Road Closure</b><br>Reason: ${closure.reason}<br>📍 Lat: ${closure.latitude}, Lng: ${closure.longitude}`);
+      });
+    }
+
+    async function loadAdaptiveMesh(lat, lng){
+      meshLayer.clearLayers();
+      try{
+        const url = `/api/adaptive_mesh?lat=${lat}&lng=${lng}&km=5`;
+        const geo = await (await fetch(url)).json();
+
+        L.geoJSON(geo,{
+          filter: f => f.geometry.type !== 'Point',
+          style: _ => ({
+            color      : "#004A99",
+            weight     : 1,
+            fill       : false,
+            dashArray  : "3 3"
+          })
+        }).addTo(meshLayer);
+      }catch(e){
+        console.error("loadAdaptiveMesh:", e);
+      }
+    }
+
+    // Helper in case you need to manually remove user marker
+    function removeUserMarker() { if (window.userMarker) map.removeLayer(window.userMarker); }
+
+    function reloadMap() { location.reload(); }
+
+    // fire.py
+    let fireOverlayLoaded = false;
+
+    async function toggleFireOverlay() {
+      if (fireOverlayLoaded) {
+        map.removeLayer(fireOverlayLayer);
+        map.removeLayer(fireBufferLayer);
+        fireBufferLayer.clearLayers();
+        fireOverlayLoaded = false;
+        return;
+      }
+
+      try {
+        const data = await (await fetch("/api/fire_layers")).json();
+        // buildings
+        L.geoJSON(data.buildings, {
+          style: f => ({
+            color: "#555", weight: 0.6,
+            fillColor: "#FFEDA0", fillOpacity: 0.35
+          }),
+          onEachFeature: (f, layer) => {
+            const h = (f.properties.height_ft || 0).toFixed(1);
+            const v = (f.properties.vulnerability || 0).toFixed(2);
+            layer.bindTooltip(`H: ${h} ft<br>Vul: ${v}`);
+          }
+        }).addTo(fireOverlayLayer);
+        // fire point + click on
+        data.fires.forEach(pt => {
+          const mk = L.circleMarker([pt.latitude, pt.longitude], {
+            radius: 5, color: "#ff0000", weight: 1,
+            fillColor: "#ff4500", fillOpacity: 0.8
+          })
+          .addTo(fireOverlayLayer)
+          .bindPopup(`<b>🔥 Fire</b><br>${pt.datetime}<br>
+                      Track:${pt.track}&nbsp;Scan:${pt.scan}`);
+          // 2km circle
+          mk.on("click", () => {
+            fireBufferLayer.clearLayers();
+            L.circle([pt.latitude, pt.longitude], {
+              radius: 2000,            // 2 km
+              color: "#ff4500", weight: 1,
+              fillColor: "#ff6347", fillOpacity: 0.20
+            }).addTo(fireBufferLayer).bringToFront();
+          });
+        });
+        // overlay + buffer
+        fireOverlayLayer.addTo(map);
+        fireBufferLayer.addTo(map);
+        fireOverlayLoaded = true;
+
+      } catch (e) {
+        console.error("toggleFireOverlay:", e);
+        alert("⚠️ 无法加载 fire.py 图层，请检查后端 /api/fire_layers。");
+      }
+    }
+    let roadGraphLoaded = false;
+
+    async function toggleRoadGraph() {
+  if (roadGraphLoaded) {
+    map.removeLayer(roadGraphLayer);
+    roadGraphLayer.clearLayers();
+    roadGraphLoaded = false;
+    return;
+  }
+
+  // use center
+  const c = map.getCenter();
+  const url = `/api/road_graph?lat=${c.lat}&lng=${c.lng}&km=5`;
+  try {
+    const data = await (await fetch(url)).json();
+
+    // edge line
+    L.geoJSON(data.edges, {
+      style: _ => ({ color: "#FFA500", weight: 1 })
+    }).addTo(roadGraphLayer);
+
+    // node 
+    L.geoJSON(data.nodes, {
+      pointToLayer: (_, latlng) =>
+        L.circleMarker(latlng, {
+          radius: 2,
+          color: "#00FFFF",
+          weight: 1,
+          fillOpacity: 0.6
+        })
+    }).addTo(roadGraphLayer);
+
+    roadGraphLayer.addTo(map);
+    roadGraphLoaded = true;
+
+  } catch (e) {
+    console.error("toggleRoadGraph:", e);
+    alert("⚠️ 无法加载 road graph 图层，请检查 /api/road_graph");
+  }
+    }
+    async function doRoutePlan() {
+  if (!startLatLng || !endLatLng) {
+    alert("请先在地图上依次点选起点和终点");
+    return;
+  }
+  const url = `/api/route_plan?lat1=${startLatLng.lat}&lng1=${startLatLng.lng}` +
+              `&lat2=${endLatLng.lat}&lng2=${endLatLng.lng}`;
+  try {
+    const data = await (await fetch(url)).json();
+    if (data.error) throw data.error;
+
+    // red line
+    L.geoJSON(data.route, {
+      style: {color:"#FF0000", weight:4}
+    }).addTo(routeLayer);
+    
+    if (data.distance_km !== undefined) {
+      document.getElementById("routeInfo").innerText =
+        `🛣️  Route distance: ${data.distance_km.toFixed(2)} km`;
+      console.log(`Route distance: ${data.distance_km.toFixed(2)} km`);
+    }
+    // zoom in out
+    routeLayer.getBounds().isValid() && map.fitBounds(routeLayer.getBounds());
+
+  } catch (e) {
+    console.error(e);
+    alert("⚠️ 无法规划路径：" + e);
+  }
+    }
+
+    // Load user marker from localStorage on startup
+    function loadUserLocation() {
+    try {
+      const stored = JSON.parse(localStorage.getItem("myLocation"));
+      if (stored && !isNaN(stored.lat) && !isNaN(stored.lng)) {
+        updateUserMarker(stored.lat, stored.lng, true);
+        return;                 
+      }
+    } catch (_) {}
+
+    fetch("/api/get_user_locations")
+      .then(r => r.json())
+      .then(users => {
+        const me = users.find(u => u.username === CURRENT_USER);
+        if (me && !isNaN(me.latitude) && !isNaN(me.longitude)) {
+          updateUserMarker(me.latitude, me.longitude, true);
+        }
+      })
+      .catch(err => console.error("loadUserLocation:", err));
+    }
+
+    // MAP CLICK HANDLER (prefill inputs)
+    map.on("click", e => {
+      document.getElementById("latInput").value = e.latlng.lat.toFixed(5);
+      document.getElementById("lngInput").value = e.latlng.lng.toFixed(5);
+    });
+
+    var routeLayer = L.featureGroup().addTo(map);
+    let startLatLng  = null, endLatLng = null;
+    let startMarker  = null, endMarker = null;
+
+    map.on("click", function (e) {
+  if (!startLatLng) {                     // start point
+    startLatLng = e.latlng;
+    startMarker = L.marker(e.latlng, {
+      icon: L.icon({ iconUrl: "/static/img/start.png", iconSize: [24, 24] })
+    }).addTo(map);
+
+  } else if (!endLatLng) {                // end point
+    endLatLng = e.latlng;
+    endMarker = L.marker(e.latlng, {
+      icon: L.icon({ iconUrl: "/static/img/end.png", iconSize: [24, 24] })
+    }).addTo(map);
+
+  } else {                                // clear for the third time
+    routeLayer.clearLayers();
+    map.removeLayer(startMarker);
+    map.removeLayer(endMarker);
+    startLatLng = endLatLng = null;
+    startMarker = endMarker = null;
+  }
+    });
+
+    // INITIAL LOAD
+    loadWildfires();
+    loadRoadClosures();
+    loadUserLocation(); // restore user icon if it was set earlier
+    async function showFireInfo(fireId){
+  try{
+    const data = await (await fetch(`/api/fire_detail/${fireId}`)).json();
+    if(data.error){ alert("No details"); return; }
+
+    infoTitle.textContent = data.description || `Wildfire #${data.id}`;
+    infoBody.innerHTML = `
+      <p><b>ID:</b> ${data.id}</p>
+      <p><b>Cause:</b> ${data.reason}</p>
+      <p><b>Latitude:</b> ${data.latitude.toFixed(5)}</p>
+      <p><b>Longitude:</b> ${data.longitude.toFixed(5)}</p>
+    `;
+    infoPanel.classList.add("show");
+  }catch(e){
+    console.error(e);
+    alert("Failed to load detail");
+  }
+    }
+
+  </script>
+{% endblock %}

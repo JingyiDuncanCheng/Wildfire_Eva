@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>{% block title %}Wildfire & Emergency Response{% endblock %}</title>
+
+  <link rel="preconnect" href="https://fonts.gstatic.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.0/dist/darkly/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+
+  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+  <script> const CURRENT_USER = "{{ username|e }}"; </script>
+</head>
+<body>
+  <div id="sidebar" class="p-3 shadow">
+      <!-- Toggle switch for EMERGENCY / ADMIN -->
+      <div class="d-flex justify-content-center mb-3" id="modeToggle">
+        <button id="btnEmergency" class="btn btn-sm btn-success me-2 active" onclick="switchPanel('emergency')"> Emergency </button>
+        <button id="btnAdmin" class="btn btn-sm btn-outline-success" onclick="switchPanel('admin')"> Admin </button>
+      </div>    
+    
+      <!-- Emergency panel -->
+      <div id="emergencyPanel">
+        <h2 class="text-primary" style="font-size: 1.1rem;">Emergency Reports</h2>
+        <h5>Select Location</h5>
+        <div class="input-group mb-2">
+          <input type="text" id="latInput" class="form-control form-control-sm" placeholder="Latitude" />
+          <input type="text" id="lngInput" class="form-control form-control-sm" placeholder="Longitude" />
+        </div>
+        <!-- Wildfire reporting -->
+        <h5>Report Wildfire</h5>
+        <input type="text" id="fireDesc" class="form-control form-control-sm mb-2" placeholder="Description" />
+        <select id="fireCause" class="form-select form-select-sm mb-2">
+          <option value="Unknown">Unknown</option>
+          <option value="Lightning">Lightning</option>
+          <option value="Human-caused">Human-caused</option>
+          <option value="Campfire">Campfire</option>
+        </select>
+        <button class="btn btn-danger btn-sm w-100 mb-2" onclick="addFireLocation()"> Report Wildfire </button>
+        <!-- Road closure -->
+        <h5>Report Road Closure</h5>
+        <select id="roadReason" class="form-select form-select-sm mb-2">
+          <option value="Fire">Fire</option>
+          <option value="Accident">Accident</option>
+          <option value="Flood">Flood</option>
+          <option value="Construction">Construction</option>
+        </select>
+        <button class="btn btn-warning btn-sm w-100 mb-3" onclick="addRoadClosure()"> Report Closure </button>
+        <!-- User Location -->
+        <h5>My Location</h5>
+        <button class="btn btn-primary btn-sm w-100 mb-2" onclick="setUserLocation()"> Set My Location </button>
+        <button class="btn btn-secondary btn-sm w-100" onclick="reloadMap()"> Refresh Map </button>
+        <button class="btn btn-outline-danger btn-sm w-100 mb-2" onclick="toggleFireOverlay()"> Fire-Overlay </button>
+        <button class="btn btn-outline-info btn-sm w-100 mb-2" onclick="toggleRoadGraph()"> Road-Graph </button>
+        <button class="btn btn-warning btn-sm w-100 mb-2" onclick="doRoutePlan()">
+          Route-Plan
+        </button>
+        <div id="routeInfo" class="text-info mb-2" style="font-size:0.9rem;"></div>
+        <!-- Add emergency vehicle -->
+        <h5 class="mt-3">Add Emergency Vehicle</h5>
+        <input type="text" id="vehicleLat" class="form-control form-control-sm mb-2" placeholder="Latitude" />
+        <input type="text" id="vehicleLng" class="form-control form-control-sm mb-2" placeholder="Longitude" />
+        <input type="number" id="vehicleCapacity" class="form-control form-control-sm mb-2" placeholder="Capacity" />
+        <select id="vehicleType" class="form-select form-select-sm mb-2">
+          <option value="ambulance">Ambulance</option>
+          <option value="car">Car</option>
+          <option value="bus">Bus</option>
+          <option value="truck">Truck</option>
+        </select>
+        <button class="btn btn-success btn-sm w-100" onclick="addVehicle()"> Add Vehicle </button>
+        <button class="btn btn-dark btn-sm w-100 mb-2" onclick="logoutApp()"> Logout </button>
+      </div>
+
+      <!-- Admin Panel -->
+      <div id="adminPanel" style="display: none;">
+        <h2 style="font-size: 1.1rem;">Admin Panel</h2>
+        <!-- Admin login -->
+        <div id="loginSection">
+          <label style="font-size: 0.9rem;">Username:</label>
+          <input type="text" id="adminUsername" class="form-control form-control-sm mb-2" />
+          <label style="font-size: 0.9rem;">Password:</label>
+          <input type="password" id="adminPassword" class="form-control form-control-sm mb-2" />
+          <button class="btn btn-dark btn-sm w-100 mb-2" onclick="adminLogin()"> Admin Login </button>
+        </div>
+        <!-- Admin actions -->
+        <div id="adminActions" style="display: none;">
+          <h5>Delete Data</h5>
+          <input type="text" id="deleteUserInput" class="form-control form-control-sm mb-2" placeholder="Username" />
+          <button class="btn btn-danger btn-sm w-100 mb-2" onclick="deleteUser()"> Delete User </button>
+          <input type="text" id="deleteFireInput" class="form-control form-control-sm mb-2" placeholder="Wildfire ID" />
+          <button class="btn btn-danger btn-sm w-100 mb-2" onclick="deleteWildfire()"> Delete Wildfire </button>
+          <input type="text" id="deleteRoadInput" class="form-control form-control-sm mb-2" placeholder="Road Closure ID" />
+          <button class="btn btn-danger btn-sm w-100 mb-2" onclick="deleteRoadClosure()"> Delete Road Closure </button>
+          <button class="btn btn-light btn-sm w-100" onclick="adminLogout()"> Logout Admin </button>
+        </div>
+      </div>
+  </div>
+  <div id="infoPanel">
+    <button id="closeInfo" title="Close">&times;</button>
+    <h3 id="infoTitle"></h3>
+    <div id="infoBody"></div>
+  </div>
+  <div id="content">
+      {% block content %}{% endblock %}
+  </div>
+
+</body>
+</html>
